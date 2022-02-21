@@ -1,0 +1,127 @@
+---
+title: "Web Scraping Pipeline with RMarkdown & AWS S3"
+author: "Majestic Data Solutions"
+output: 
+  slidy_presentation:
+    css: ['styles.css', 'https://fonts.googleapis.com/css?family=Open+Sans']
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+library(httr)
+library(XML)
+library(dplyr)
+library(jsonlite)
+library(magrittr)
+library(xml2)
+library(rvest)
+library(iotools)
+library(aws.s3)
+library(DT)
+library(reticulate)
+library(jsonlite)
+```
+
+## Data Pipelines with RMarkdown & AWS S3
+
+In this episode we will be creating Data Pipelines in RMarkdown and using AWS to store the data in the cloud. For this episode, we are going to web scrape some data from **Wikipedia** & **Fintel** on **Blackrock**.
+
+## Episode Sections
+
+-   Scrape Wikipedia Data
+-   Scrape Fintel Data
+-   Send to AWS S3
+
+## Wikipedia Web Scrape for Blackrock
+
+```{r wiki, echo = TRUE}
+blackrock_wiki <- "https://en.wikipedia.org/wiki/BlackRock"
+blackrock_hist_data <- read_html(blackrock_wiki, as.data.frame=T, stringsAsFactors = TRUE)
+blackrock_hist_df <- blackrock_hist_data %>%  
+  html_nodes("table") %>% 
+  .[[2]] %>% 
+  html_table(fill=T)
+DT::datatable(blackrock_hist_df,rownames = FALSE,options = list(
+                        initComplete = JS(
+                            "function(settings, json) {",
+                            "$(this.api().table().header()).css({'color': '#fff'});",
+                            "}")))
+```
+
+## Fintel Webscrape for Blackrock w R
+
+```{r fintel,echo = TRUE}
+blackrock_fintel_url <- "https://fintel.io/iind/blackrock"
+blackrock_fintel_data <- read_html(blackrock_fintel_url, as.data.frame=T, stringsAsFactors = TRUE)
+blackrock_fintel_df <- blackrock_fintel_data %>%
+  html_nodes("table") %>%
+  .[[2]] %>%
+  html_table(fill=T)
+write.csv(blackrock_fintel_df,"data/blackrock_df.csv")
+blackrock_fintel_json <- blackrock_fintel_df %>% toJSON()
+DT::datatable(blackrock_fintel_df,rownames = FALSE,options = list(
+                        initComplete = JS(
+                            "function(settings, json) {",
+                            "$(this.api().table().header()).css({'color': '#fff'});",
+                            "}")))
+```
+
+## Fintel Webscrape for Blackrock w Python
+
+```{python}
+import pandas as pd
+import requests
+blackrock = "https://fintel.io/iind/blackrock"
+blackrock_request = requests.get(blackrock)
+blackrock_df = pd.read_html(blackrock_request.text)[1]
+blackrock_df
+```
+
+## Store Data in List
+
+```{r list,echo = TRUE}
+blackrock_list <- list(blackrock_fintel_json,blackrock_hist_df)
+str(blackrock_list)
+```
+
+## Set AWS Credentials
+
+```{r creds,echo=TRUE}
+AWS_ACCESS_KEY_ID_mm <-  read.csv("api_keys/aws.csv",stringsAsFactors = FALSE) %>% 
+  dplyr::select(key_id) %>%
+  as.character()
+AWS_SECRET_ACCESS_KEY_mm <- read.csv("api_keys/aws.csv",stringsAsFactors = FALSE) %>% 
+  dplyr::select(secret_access) %>%
+  as.character()
+AWS_DEFAULT_REGION_mm <- read.csv("api_keys/aws.csv",stringsAsFactors = FALSE) %>% 
+  dplyr::select(region) %>%
+  as.character()
+
+Sys.setenv(
+  "AWS_ACCESS_KEY_ID" = AWS_ACCESS_KEY_ID_mm,
+  "AWS_SECRET_ACCESS_KEY" = AWS_SECRET_ACCESS_KEY_mm,
+  "AWS_DEFAULT_REGION" = AWS_DEFAULT_REGION_mm
+)
+rm(AWS_ACCESS_KEY_ID_mm)
+rm(AWS_SECRET_ACCESS_KEY_mm)
+rm(AWS_DEFAULT_REGION_mm)
+print("Set AWS credentials")
+```
+
+## Send Data to AWS
+
+```{r aws,echo = TRUE}
+s3save(blackrock_hist_df, bucket = "youtube-majestic", object = "blackrock_wiki_df.csv")
+s3save(blackrock_fintel_df, bucket = "youtube-majestic", object = "blackrock_fintel_df.csv")
+s3save(blackrock_fintel_json, bucket = "youtube-majestic", object = "blackrock_fintel_json.json")
+s3save(blackrock_list, bucket = "youtube-majestic", object = "blackrock_list.Rdata")
+print("Both Wikipedia and Fintel Dataframes have Saved")
+```
+
+## Check that files are in AWS S3
+
+```{r check,echo= TRUE}
+files_in_bucket_df <- aws.s3::get_bucket_df("youtube-majestic")
+DT::datatable(files_in_bucket_df,rownames = FALSE)
+```
